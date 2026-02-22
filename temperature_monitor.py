@@ -164,25 +164,25 @@ class TemperatureMonitor:
     def get_cpu_temperature(self) -> Optional[float]:
         """Get CPU temperature from thermal sensors"""
         try:
-            # Try to get temperature from sensors command first (most reliable)
-            result = subprocess.run(['sensors', '-A'], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                lines = result.stdout.split('\n')
-                tccd_temps = []
-                for line in lines:
-                    # Use Tccd (actual die temperatures), not Tctl which includes an AMD offset
-                    if 'Tccd' in line and '°C' in line:
-                        parts = line.split('°C')[0].split()
-                        for part in reversed(parts):
-                            try:
-                                temp = float(part.replace('+', '').replace('*', ''))
-                                if 20 <= temp <= 100:  # Reasonable temperature range
-                                    tccd_temps.append(temp)
-                                    break
-                            except ValueError:
-                                continue
-                if tccd_temps:
-                    return max(tccd_temps)
+            # Read Tccd die temperatures directly from hwmon (k10temp driver)
+            # Tccd values are actual die temps; Tctl includes an AMD offset and is excluded
+            tccd_temps = []
+            for hwmon_dir in Path("/sys/class/hwmon").glob("hwmon*"):
+                try:
+                    if (hwmon_dir / "name").read_text().strip() != "k10temp":
+                        continue
+                    for label_file in hwmon_dir.glob("temp*_label"):
+                        if label_file.read_text().strip().startswith("Tccd"):
+                            input_file = label_file.with_name(
+                                label_file.name.replace("_label", "_input")
+                            )
+                            temp = float(input_file.read_text().strip()) / 1000.0
+                            if 20 <= temp <= 100:
+                                tccd_temps.append(temp)
+                except OSError:
+                    continue
+            if tccd_temps:
+                return max(tccd_temps)
             
             # Fallback to thermal zones
             thermal_zones = []
