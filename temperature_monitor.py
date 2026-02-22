@@ -57,7 +57,7 @@ class TemperatureMonitor:
                 "motherboard_profile": [30, 30, 40, 50, 50, 70, 60, 85, 70, 100]  # Network controller temp based
             },
             "pump_curve": {
-                "profile": [30, 30, 40, 50, 50, 70, 60, 85, 70, 100]  # Max(CPU, GPU) temp based
+                "profile": [30, 5, 40, 25, 50, 60, 60, 85, 70, 100]  # Max(CPU, GPU) temp based
             },
             "hardware": {
                 "quadro_device": "auto",
@@ -168,19 +168,21 @@ class TemperatureMonitor:
             result = subprocess.run(['sensors', '-A'], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 lines = result.stdout.split('\n')
+                tccd_temps = []
                 for line in lines:
-                    # Look for Tctl (CPU temperature) or Tccd (core temperatures)
-                    if 'Tctl:' in line or 'Tccd' in line:
-                        # Extract temperature from line like "Tctl:         +48.5°C"
-                        if '°C' in line:
-                            parts = line.split('°C')[0].split()
-                            for part in reversed(parts):
-                                try:
-                                    temp = float(part.replace('+', '').replace('*', ''))
-                                    if 20 <= temp <= 100:  # Reasonable temperature range
-                                        return temp
-                                except ValueError:
-                                    continue
+                    # Use Tccd (actual die temperatures), not Tctl which includes an AMD offset
+                    if 'Tccd' in line and '°C' in line:
+                        parts = line.split('°C')[0].split()
+                        for part in reversed(parts):
+                            try:
+                                temp = float(part.replace('+', '').replace('*', ''))
+                                if 20 <= temp <= 100:  # Reasonable temperature range
+                                    tccd_temps.append(temp)
+                                    break
+                            except ValueError:
+                                continue
+                if tccd_temps:
+                    return max(tccd_temps)
             
             # Fallback to thermal zones
             thermal_zones = []
